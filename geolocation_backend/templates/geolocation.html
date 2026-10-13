@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Threat Geolocation</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background-color: #0d0e15;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .header-bar {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(218, 165, 32, 0.25);
+            border-radius: 8px;
+            padding: 8px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .title {
+            color: #d4af37;
+            font-weight: 700;
+            font-size: 11px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        .ip-tag {
+            background: rgba(255, 23, 68, 0.2);
+            color: #ff5252;
+            border: 1px solid rgba(255, 23, 68, 0.4);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 700;
+            font-size: 11px;
+        }
+        #map {
+            width: 100%;
+            height: 200px;
+            min-height: 180px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background-color: #151722;
+        }
+        .info-card {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 11px;
+            color: #bbb;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .info-card strong {
+            color: #fff;
+        }
+        .loader {
+            color: #d4af37;
+            text-align: center;
+            font-size: 11px;
+            padding: 4px;
+        }
+        .leaflet-popup-content-wrapper {
+            background: #151722;
+            color: #fff;
+            border: 1px solid #d4af37;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header-bar">
+        <span class="title" id="location-title">IP GEOLOCATION</span>
+        <span class="ip-tag">{{ ip }}</span>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="info-card">
+        <div id="loader" class="loader">Locating IP coordinates on map...</div>
+        <div id="info-body" style="display: none;">
+            <div><strong>Location:</strong> <span id="val-loc">Detecting...</span></div>
+            <div><strong>Coordinates:</strong> <span id="val-coords">0.00, 0.00</span></div>
+            <div><strong>Address:</strong> <span id="val-addr">Approximate location</span></div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <script>
+        const targetIp = "{{ ip }}";
+
+        document.addEventListener('DOMContentLoaded', () => {
+            fetch(`/api/geolocation/${targetIp}`)
+                .then(r => r.json())
+                .then(data => {
+                    const loader = document.getElementById('loader');
+                    const infoBody = document.getElementById('info-body');
+                    if (loader) loader.style.display = 'none';
+                    if (infoBody) infoBody.style.display = 'flex';
+
+                    if (data.success && data.location && data.location.latitude && data.location.longitude) {
+                        const loc = data.location;
+                        const locStr = [loc.city, loc.region, loc.country].filter(Boolean).join(', ') || 'Unknown Region';
+                        
+                        document.getElementById('location-title').textContent = loc.country || 'IP GEOLOCATION';
+                        document.getElementById('val-loc').textContent = locStr;
+                        document.getElementById('val-coords').textContent = `${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)}`;
+                        document.getElementById('val-addr').textContent = data.address?.display_name || locStr;
+
+                        initMap(loc.latitude, loc.longitude, data);
+                    } else {
+                        document.getElementById('val-loc').textContent = data.error || 'Coordinates unavailable';
+                        initMap(20.5937, 78.9629, null, true);
+                    }
+                })
+                .catch(e => {
+                    console.error(e);
+                    document.getElementById('loader').textContent = 'Unable to fetch map data';
+                    initMap(20.5937, 78.9629, null, true);
+                });
+        });
+
+        function initMap(lat, lon, data, isError = false) {
+            try {
+                if (window.currentMap) window.currentMap.remove();
+
+                const map = L.map('map', {
+                    zoomControl: false,
+                    attributionControl: false
+                }).setView([lat, lon], isError ? 2 : 11);
+
+                window.currentMap = map;
+
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                    maxZoom: 19,
+                    subdomains: 'abcd'
+                }).addTo(map);
+
+                if (!isError && data) {
+                    const redIcon = L.divIcon({
+                        className: 'custom-div-icon',
+                        html: "<div style='background-color:#ff1744;width:14px;height:14px;border-radius:50%;border:2px solid #ffffff;box-shadow:0 0 10px #ff1744;'></div>",
+                        iconSize: [14, 14],
+                        iconAnchor: [7, 7]
+                    });
+
+                    const marker = L.marker([lat, lon], { icon: redIcon }).addTo(map);
+                    const city = data.location?.city || '';
+                    const country = data.location?.country || '';
+                    marker.bindPopup(`<b style="color:#d4af37;">${city}</b> ${country}<br><span style="font-size:10px;color:#888;">${data.ip}</span>`).openPopup();
+
+                    if (data.location?.accuracy_radius_km) {
+                        L.circle([lat, lon], {
+                            color: '#ff1744',
+                            fillColor: '#ff1744',
+                            fillOpacity: 0.15,
+                            weight: 1,
+                            radius: data.location.accuracy_radius_km * 1000
+                        }).addTo(map);
+                    }
+                }
+
+                setTimeout(() => map.invalidateSize(), 150);
+                setTimeout(() => map.invalidateSize(), 450);
+            } catch (err) {
+                console.error('Leaflet render error:', err);
+            }
+        }
+    </script>
+</body>
+</html>
